@@ -1,7 +1,6 @@
 venv/
 .venv/
 .ci_cache
-channel.json
 .env
 .clang-format
 .DS_Store

@@ -64,20 +64,6 @@ jobs:
         cd $STRIPPED_DIR
         ${{ env.RUN }} "unset PYTHONWARNINGS && SKIP=check-added-large-files pre-commit run --all && chmod -R 777 /tmp/pre-commit"
 
-  build_casync:
-    name: build casync
-    runs-on: ubuntu-20.04
-    env:
-      STRIPPED_DIR: /tmp/releasepilot
-    steps:
-    - uses: actions/checkout@v4
-      with:
-        submodules: true
-    - uses: ./.github/workflows/setup-with-retry
-    - name: Build devel
-      timeout-minutes: 1
-      run: ${{ env.RUN }} "TARGET_DIR=$STRIPPED_DIR release/build_devel_casync.sh master"
-
   build:
     strategy:
       matrix:
