@@ -39,7 +39,17 @@ def create_casync_files(dirname, channel, version, agnos_version, release_notes)
 
 def OpenpilotChannelMockAPI(release_digests, mock_releases, casync_base):
   class Handler(http.server.BaseHTTPRequestHandler):
+    API_BAD_RESPONSE = False
+    API_NO_RESPONSE = False
+
     def do_GET(self):
+      if self.API_NO_RESPONSE:
+        return
+
+      if self.API_BAD_RESPONSE:
+        self.send_response(500, "")
+        return
+
       if self.path == "/openpilot/channels":
         response = list(release_digests.keys())
       else:
@@ -82,7 +92,8 @@ class TestUpdateDCASyncStrategy(BaseUpdateTest):
     with http_server_context(DirectoryHttpServer(self.casync_dir)) as (casync_host, casync_port):
       casync_base = f"http://{casync_host}:{casync_port}"
 
-      with http_server_context(OpenpilotChannelMockAPI(self.release_digests, self.MOCK_RELEASES, casync_base)) as (api_host, api_port):
+      self.handler = OpenpilotChannelMockAPI(self.release_digests, self.MOCK_RELEASES, casync_base)
+      with http_server_context(self.handler) as (api_host, api_port):
         os.environ["API_HOST"] = f"http://{api_host}:{api_port}"
         yield
 
@@ -105,3 +116,26 @@ class TestUpdateDCASyncStrategy(BaseUpdateTest):
       self._test_params("release3", False, True)
 
       self._test_finalized_update("release3", *self.MOCK_RELEASES["release3"])
+
+  def test_recover_from_bad_api_response(self):
+    # Start on release3, ensure we don't fetch any updates
+    self.setup_remote_release("release3")
+    self.setup_basedir_release("release3")
+
+    with self.additional_context():
+      self.handler.API_NO_RESPONSE = True
+      with processes_context(["updated"]) as [updated]:
+        self._test_params("release3", False, False)
+        self.wait_for_failed()
+        self._test_params("release3", False, False)
+
+        self.send_check_for_updates_signal(updated)
+
+        self.wait_for_failed()
+        self._test_params("release3", False, False)
+
+        self.handler.API_NO_RESPONSE = False
+
+        self.send_check_for_updates_signal(updated)
+        self.wait_for_idle()
+        self._test_params("release3", False, False)

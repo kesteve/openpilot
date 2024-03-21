@@ -29,13 +29,13 @@ def get_available_channels() -> list | None:
     cloudlog.exception("fetching remote channels")
     return None
 
-def get_remote_channel_data(channel) -> tuple[BuildMetadata, Manifest] | None:
+def get_remote_channel_data(channel) -> tuple[BuildMetadata | None, Manifest | None]:
   try:
     data = requests.get(f"{API_HOST}/{CHANNELS_API_ROOT}/{channel}").json()
     return build_metadata_from_dict(data["build_metadata"]), data["manifest"]
   except Exception:
     cloudlog.exception("fetching remote manifest failed")
-    return None
+    return None, None
 
 
 LOCK_FILE = os.getenv("UPDATER_LOCK_FILE", "/tmp/safe_staging_overlay.lock")
@@ -61,6 +61,7 @@ class UpdaterState(StrEnum):
   CHECKING = "checking..."
   DOWNLOADING = "downloading..."
   FINALIZING = "finalizing update..."
+  FAILED = "failed to check for update..."
 
 
 def set_status_params(state: UpdaterState, update_available = False, update_ready = False):
@@ -144,32 +145,34 @@ def main():
 
     remote_build_metadata, remote_manifest = get_remote_channel_data(target_channel)
 
-    update_available = check_update_available(BASEDIR, remote_build_metadata)
+    if remote_build_metadata is not None or remote_manifest is not None:
+      update_available = check_update_available(BASEDIR, remote_build_metadata)
 
-    if update_ready and not check_update_available(FINALIZED, remote_build_metadata):
-      update_available = False
-
-    set_status_params(UpdaterState.IDLE, update_available, update_ready)
-
-    if update_available:
-      if user_requested_check:
-        cloudlog.info("skipping fetch, only checking")
-      else:
+      if update_ready and not check_update_available(FINALIZED, remote_build_metadata):
         update_available = False
-        set_status_params(UpdaterState.DOWNLOADING)
-        download_update(remote_manifest)
 
-        if AGNOS:
-          handle_agnos_update(CASYNC_PATH)
+      set_status_params(UpdaterState.IDLE, update_available, update_ready)
 
-        set_status_params(UpdaterState.FINALIZING)
-        finalize_update()
-        new_build_metadata = get_build_metadata(FINALIZED)
-        set_new_channel_params(new_build_metadata)
-        update_ready = get_consistent_flag(FINALIZED)
+      if update_available:
+        if user_requested_check:
+          cloudlog.info("skipping fetch, only checking")
+        else:
+          update_available = False
+          set_status_params(UpdaterState.DOWNLOADING)
+          download_update(remote_manifest)
 
+          if AGNOS:
+            handle_agnos_update(CASYNC_PATH)
 
-    set_status_params(UpdaterState.IDLE, update_available, update_ready)
+          set_status_params(UpdaterState.FINALIZING)
+          finalize_update()
+          new_build_metadata = get_build_metadata(FINALIZED)
+          set_new_channel_params(new_build_metadata)
+          update_ready = get_consistent_flag(FINALIZED)
+
+      set_status_params(UpdaterState.IDLE, update_available, update_ready)
+    else:
+      set_status_params(UpdaterState.FAILED, False, False)
 
     wait_helper.user_request = UserRequest.NONE
     wait_helper.sleep(UPDATE_DELAY)
