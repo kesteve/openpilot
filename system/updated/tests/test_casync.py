@@ -1,30 +1,40 @@
 import contextlib
+import dataclasses
 import http
 import json
 import os
 import pathlib
 
 from openpilot.selfdrive.test.helpers import DirectoryHttpServer, http_server_context, processes_context
-from openpilot.selfdrive.updated.casync.common import CHANNEL_MANIFEST_FILE, create_caexclude_file, create_casync_release, create_manifest
+from openpilot.system.updated.casync.common import create_build_metadata_file, create_caexclude_file, create_casync_release
+from openpilot.system.version import BuildMetadata, OpenpilotMetadata
 from openpilot.selfdrive.updated.tests.test_base import BaseUpdateTest, run, update_release
 
 
-def create_remote_manifest(release, version, agnos_version, release_notes, casync_caidx, casync_digest):
-  manifest = create_manifest(release, version, release_notes)
-
-  manifest["casync"] = {
-    "caidx": casync_caidx,
-    "digest": casync_digest
+def create_remote_response(channel, build_metadata, casync_caidx, casync_digest):
+  return {
+    "build_metadata": dataclasses.asdict(build_metadata),
+    "manifest": [
+      {
+        "type": "path",
+        "path": "/data/openpilot",
+        "casync": {
+          "caidx": casync_caidx,
+          "digest": casync_digest
+        }
+      }
+    ]
   }
 
-  return manifest
+
+def create_mock_build_metadata(channel, version, agnos_version, release_notes):
+  commit = hash((version, agnos_version, release_notes))  # simulated commit
+  return BuildMetadata(channel, OpenpilotMetadata(version, release_notes, commit, "https://github.com/commaai/openpilot.git", "2024", False))
 
 
-def create_casync_files(dirname, release, version, agnos_release, release_notes):
+def create_casync_files(dirname, channel, version, agnos_version, release_notes):
   create_caexclude_file(pathlib.Path(dirname))
-
-  with open(pathlib.Path(dirname) / CHANNEL_MANIFEST_FILE, "w") as f:
-    json.dump(create_manifest(release, version, release_notes), f)
+  create_build_metadata_file(pathlib.Path(dirname), create_mock_build_metadata(channel, version, agnos_version, release_notes), channel)
 
 
 def OpenpilotChannelMockAPI(release_digests, mock_releases, casync_base):
@@ -34,7 +44,8 @@ def OpenpilotChannelMockAPI(release_digests, mock_releases, casync_base):
         response = list(release_digests.keys())
       else:
         channel = self.path.split("/")[-1]
-        response = create_remote_manifest(channel, *mock_releases[channel], f"{casync_base}/{channel}.caidx", release_digests[channel])
+        build_metadata = create_mock_build_metadata(channel, *mock_releases[channel])
+        response = create_remote_response(channel, build_metadata, f"{casync_base}/{channel}.caidx", release_digests[channel])
 
       response = json.dumps(response)
 

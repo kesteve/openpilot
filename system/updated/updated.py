@@ -1,5 +1,4 @@
 from enum import StrEnum
-import json
 import os
 from pathlib import Path
 import shutil
@@ -8,15 +7,18 @@ import requests
 
 from openpilot.common.basedir import BASEDIR
 from openpilot.common.params import Params
+from openpilot.common.run import run_cmd
 from openpilot.common.swaglog import cloudlog
-from openpilot.selfdrive.updated.casync.common import CASYNC_ARGS, CHANNEL_MANIFEST_FILE
-from openpilot.selfdrive.updated.common import get_version, get_release_notes, get_git_branch, run
+from openpilot.system.updated.casync.common import CASYNC_ARGS
 from openpilot.selfdrive.updated.tests.test_base import get_consistent_flag
 from openpilot.selfdrive.updated.updated import UserRequest, WaitTimeHelper, handle_agnos_update
 from openpilot.system.hardware import AGNOS
+from openpilot.system.version import BuildMetadata, get_build_metadata, build_metadata_from_dict
 
 UPDATE_DELAY = 60
 CHANNELS_API_ROOT = "openpilot/channels"
+
+Manifest = dict
 
 API_HOST = os.getenv('API_HOST', 'https://api.commadotai.com')
 
@@ -27,9 +29,10 @@ def get_available_channels() -> list | None:
     cloudlog.exception("fetching remote channels")
     return None
 
-def get_remote_manifest(channel) -> dict | None:
+def get_remote_channel_data(channel) -> tuple[BuildMetadata, Manifest] | None:
   try:
-    return dict(requests.get(f"{API_HOST}/{CHANNELS_API_ROOT}/{channel}").json())
+    data = requests.get(f"{API_HOST}/{CHANNELS_API_ROOT}/{channel}").json()
+    return build_metadata_from_dict(data["build_metadata"]), data["manifest"]
   except Exception:
     cloudlog.exception("fetching remote manifest failed")
     return None
@@ -41,34 +44,6 @@ STAGING_ROOT = os.getenv("UPDATER_STAGING_ROOT", "/data/safe_staging")
 CASYNC_PATH = Path(STAGING_ROOT) / "casync"        # where the casync update is pulled
 CASYNC_TMPDIR = Path(STAGING_ROOT) / "casync_tmp"  # working directory for casync temp files
 FINALIZED = os.path.join(STAGING_ROOT, "finalized")
-
-def manifest_from_git(path: str) -> dict | None:
-  branch = get_git_branch(path)
-  version = get_version(path)
-  release_notes = get_release_notes(path)
-
-  return {
-    "name": branch,
-    "openpilot": {
-      "version": version,
-      "release_notes": release_notes
-    }
-  }
-
-
-def read_manifest(path: str = BASEDIR) -> dict | None:
-  try:
-    with open(Path(path) / CHANNEL_MANIFEST_FILE) as f:
-      return dict(json.load(f))
-  except Exception:
-    cloudlog.exception("reading channel manifest failed")
-
-  try:
-    return manifest_from_git(path)
-  except Exception:
-    cloudlog.exception("reading git manifest failed")
-
-  return None
 
 
 def set_consistent_flag(consistent: bool) -> None:
@@ -95,27 +70,28 @@ def set_status_params(state: UpdaterState, update_available = False, update_read
   params.put_bool("UpdateAvailable", update_ready)
 
 
-def set_channel_params(name, manifest):
+def set_channel_params(name, build_metadata: BuildMetadata):
   params = Params()
-  params.put(f"Updater{name}Description", f'{manifest["openpilot"]["version"]} / {manifest["name"]}')
-  params.put(f"Updater{name}ReleaseNotes", bytes(MarkdownIt().render(manifest["openpilot"]["release_notes"]), encoding="utf-8"))
+  params.put(f"Updater{name}Description", f'{build_metadata.openpilot.version} / {build_metadata.channel}')
+  params.put(f"Updater{name}ReleaseNotes", bytes(MarkdownIt().render(build_metadata.openpilot.release_notes), encoding="utf-8"))
 
 
-def set_current_channel_params(manifest):
-  set_channel_params("Current", manifest)
+def set_current_channel_params(build_metadata: BuildMetadata):
+  set_channel_params("Current", build_metadata)
 
 
-def set_new_channel_params(manifest):
-  set_channel_params("New", manifest)
+def set_new_channel_params(build_metadata: BuildMetadata):
+  set_channel_params("New", build_metadata)
 
 
 def get_digest(directory) -> str | None:
-  return str(run(["casync", "digest", *CASYNC_ARGS, directory])).strip()
+  return str(run_cmd(["casync", "digest", *CASYNC_ARGS, directory])).strip()
 
 
-def check_update_available(current_directory, other_manifest):
-  return read_manifest(current_directory)["name"] != other_manifest["name"] or \
-         get_digest(current_directory) != other_manifest["casync"]["digest"]
+def check_update_available(current_directory, other_metadata: BuildMetadata):
+  build_metadata = get_build_metadata(current_directory)
+  return build_metadata.channel != build_metadata.channel or \
+         build_metadata.openpilot.git_commit != other_metadata.openpilot.git_commit
 
 
 def download_update(manifest):
@@ -124,7 +100,10 @@ def download_update(manifest):
   env["TMPDIR"] = str(CASYNC_TMPDIR)
   CASYNC_TMPDIR.mkdir(exist_ok=True)
   CASYNC_PATH.mkdir(exist_ok=True)
-  run(["casync", "extract", manifest["casync"]["caidx"], str(CASYNC_PATH), f"--seed={BASEDIR}", *CASYNC_ARGS], env=env)
+
+  for entry in manifest:
+    if "type" in entry and entry["type"] == "path" and entry["path"] == "/data/openpilot":
+      run_cmd(["casync", "extract", entry["casync"]["caidx"], str(CASYNC_PATH), f"--seed={BASEDIR}", *CASYNC_ARGS], env=env)
 
 
 def finalize_update():
@@ -149,10 +128,10 @@ def main():
     wait_helper.ready_event.clear()
 
     target_channel = params.get("UpdaterTargetBranch", encoding='utf8')
-    current_manifest = read_manifest(BASEDIR)
+    build_metadata = get_build_metadata()
 
     if target_channel is None:
-      target_channel = current_manifest["name"]
+      target_channel = build_metadata.channel
       params.put("UpdaterTargetBranch", target_channel)
 
     user_requested_check = wait_helper.user_request == UserRequest.CHECK
@@ -161,13 +140,13 @@ def main():
 
     update_ready = get_consistent_flag(FINALIZED)
 
-    set_current_channel_params(current_manifest)
+    set_current_channel_params(build_metadata)
 
-    remote_manifest = get_remote_manifest(target_channel)
+    remote_build_metadata, remote_manifest = get_remote_channel_data(target_channel)
 
-    update_available = check_update_available(BASEDIR, remote_manifest)
+    update_available = check_update_available(BASEDIR, remote_build_metadata)
 
-    if update_ready and not check_update_available(FINALIZED, remote_manifest):
+    if update_ready and not check_update_available(FINALIZED, remote_build_metadata):
       update_available = False
 
     set_status_params(UpdaterState.IDLE, update_available, update_ready)
@@ -185,8 +164,8 @@ def main():
 
         set_status_params(UpdaterState.FINALIZING)
         finalize_update()
-        new_manifest = read_manifest(FINALIZED)
-        set_new_channel_params(new_manifest)
+        new_build_metadata = get_build_metadata(FINALIZED)
+        set_new_channel_params(new_build_metadata)
         update_ready = get_consistent_flag(FINALIZED)
 
 
