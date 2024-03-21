@@ -29,7 +29,7 @@ def create_remote_response(channel, build_metadata, casync_caidx, casync_digest)
 
 def create_mock_build_metadata(channel, version, agnos_version, release_notes):
   commit = hash((version, agnos_version, release_notes))  # simulated commit
-  return BuildMetadata(channel, OpenpilotMetadata(version, release_notes, commit, "https://github.com/commaai/openpilot.git", "2024", False))
+  return BuildMetadata(channel, OpenpilotMetadata(version, release_notes, commit, "https://github.com/commaai/openpilot.git", "2024", "release", False))
 
 
 def create_casync_files(dirname, channel, version, agnos_version, release_notes):
