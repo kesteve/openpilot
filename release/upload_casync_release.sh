@@ -1,7 +1,9 @@
 #!/bin/bash
 
-OPENPILOT_CHANNELS="https://commadist.blob.core.windows.net/openpilot-channels/"
+CASYNC_DIR="${CASYNC_DIR:=/tmp/casync}"
 
-SAS="$(python -c 'from tools.lib.azure_container import get_container_sas;print(get_container_sas("commadist","openpilot-channels"))')"
+OPENPILOT_RELEASES="https://commadist.blob.core.windows.net/openpilot-releases/"
 
-azcopy cp "/tmp/casync/*" "$OPENPILOT_CHANNELS?$SAS" --recursive
+SAS="$(python -c 'from tools.lib.azure_container import get_container_sas;print(get_container_sas("commadist","openpilot-releases"))')"
+
+azcopy cp "$CASYNC_DIR*" "$OPENPILOT_RELEASES?$SAS" --recursive
