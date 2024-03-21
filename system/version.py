@@ -105,9 +105,8 @@ class BuildMetadata:
 
 
 def build_metadata_from_dict(build_metadata: dict) -> BuildMetadata:
-  openpilot_metadata = build_metadata.get("openpilot", {})
-
   channel = build_metadata.get("channel", "unknown")
+  openpilot_metadata = build_metadata.get("openpilot", {})
   version = openpilot_metadata.get("version", "unknown")
   release_notes = openpilot_metadata.get("release_notes", "unknown")
   git_commit = openpilot_metadata.get("git_commit", "unknown")
