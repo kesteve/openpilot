@@ -16,7 +16,7 @@ from openpilot.system.hardware import AGNOS
 from openpilot.system.version import BuildMetadata, get_build_metadata, build_metadata_from_dict
 
 UPDATE_DELAY = 60
-CHANNELS_API_ROOT = "openpilot/channels"
+CHANNELS_API_ROOT = "v1/openpilot/channels"
 
 Manifest = dict
 

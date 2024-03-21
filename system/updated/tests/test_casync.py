@@ -50,7 +50,7 @@ def OpenpilotChannelMockAPI(release_digests, mock_releases, casync_base):
         self.send_response(500, "")
         return
 
-      if self.path == "/openpilot/channels":
+      if self.path == "/v1/openpilot/channels":
         response = list(release_digests.keys())
       else:
         channel = self.path.split("/")[-1]
