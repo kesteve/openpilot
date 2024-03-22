@@ -7,12 +7,11 @@ import requests
 
 from openpilot.common.basedir import BASEDIR
 from openpilot.common.params import Params
-from openpilot.common.run import run_cmd
 from openpilot.common.swaglog import cloudlog
-from openpilot.system.updated.casync.common import CASYNC_ARGS
 from openpilot.selfdrive.updated.tests.test_base import get_consistent_flag
 from openpilot.selfdrive.updated.updated import UserRequest, WaitTimeHelper, handle_agnos_update
 from openpilot.system.hardware import AGNOS
+from openpilot.system.updated.casync.read import extract_remote
 from openpilot.system.version import BuildMetadata, get_build_metadata, build_metadata_from_dict
 
 UPDATE_DELAY = 60
@@ -85,9 +84,6 @@ def set_new_channel_params(build_metadata: BuildMetadata):
   set_channel_params("New", build_metadata)
 
 
-def get_digest(directory) -> str | None:
-  return str(run_cmd(["casync", "digest", *CASYNC_ARGS, directory])).strip()
-
 
 def check_update_available(current_directory, other_metadata: BuildMetadata):
   build_metadata = get_build_metadata(current_directory)
@@ -104,7 +100,7 @@ def download_update(manifest):
 
   for entry in manifest:
     if "type" in entry and entry["type"] == "path" and entry["path"] == "/data/openpilot":
-      run_cmd(["casync", "extract", entry["casync"]["caidx"], str(CASYNC_PATH), f"--seed={BASEDIR}", *CASYNC_ARGS], env=env)
+      extract_remote(entry["casync"]["caidx"], CASYNC_PATH)
 
 
 def finalize_update():
