@@ -89,11 +89,12 @@ class TestUpdateDCASyncStrategy(BaseUpdateTest):
 
   @contextlib.contextmanager
   def additional_context(self):
-    with http_server_context(DirectoryHttpServer(self.casync_dir)) as (casync_host, casync_port):
+    self.directory_handler = DirectoryHttpServer(self.casync_dir)
+    with http_server_context(self.directory_handler) as (casync_host, casync_port):
       casync_base = f"http://{casync_host}:{casync_port}"
 
-      self.handler = OpenpilotChannelMockAPI(self.release_digests, self.MOCK_RELEASES, casync_base)
-      with http_server_context(self.handler) as (api_host, api_port):
+      self.api_handler = OpenpilotChannelMockAPI(self.release_digests, self.MOCK_RELEASES, casync_base)
+      with http_server_context(self.api_handler) as (api_host, api_port):
         os.environ["API_HOST"] = f"http://{api_host}:{api_port}"
         yield
 
@@ -123,7 +124,7 @@ class TestUpdateDCASyncStrategy(BaseUpdateTest):
     self.setup_basedir_release("release3")
 
     with self.additional_context():
-      self.handler.API_NO_RESPONSE = True
+      self.api_handler.API_NO_RESPONSE = True
       with processes_context(["updated"]) as [updated]:
         self._test_params("release3", False, False)
         self.wait_for_failed()
@@ -134,8 +135,41 @@ class TestUpdateDCASyncStrategy(BaseUpdateTest):
         self.wait_for_failed()
         self._test_params("release3", False, False)
 
-        self.handler.API_NO_RESPONSE = False
+        self.api_handler.API_NO_RESPONSE = False
 
         self.send_check_for_updates_signal(updated)
         self.wait_for_idle()
         self._test_params("release3", False, False)
+
+  def test_recover_from_network_failure(self):
+    # Start on release3, ensure we don't fetch any updates
+    self.setup_remote_release("release3")
+    self.setup_basedir_release("release3")
+
+    with self.additional_context():
+      self.directory_handler.API_NO_RESPONSE = True
+      with processes_context(["updated"]) as [updated]:
+        self._test_params("release3", False, False)
+        self.wait_for_idle()
+        self._test_params("release3", False, False)
+
+        self.MOCK_RELEASES["release3"] = ("0.1.3", "1.2", "0.1.3 release notes")
+        self.update_remote_release("release3")
+
+        self.send_check_for_updates_signal(updated)
+        self.wait_for_fetch_available()
+
+        self._test_params("release3", True, False)
+
+        self.send_download_signal(updated)
+
+        self.wait_for_failed()
+
+        self.directory_handler.API_NO_RESPONSE = False
+
+        self.send_download_signal(updated)
+
+        self.wait_for_update_available()
+
+        self._test_params("release3", False, True)
+        self._test_finalized_update("release3", *self.MOCK_RELEASES["release3"])

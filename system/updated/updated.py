@@ -155,18 +155,20 @@ def main():
         else:
           update_available = False
           set_status_params(UpdaterState.DOWNLOADING)
-          download_update(remote_manifest)
+          try:
+            download_update(remote_manifest)
+            if AGNOS:
+              handle_agnos_update(CASYNC_PATH)
 
-          if AGNOS:
-            handle_agnos_update(CASYNC_PATH)
-
-          set_status_params(UpdaterState.FINALIZING)
-          finalize_update()
-          new_build_metadata = get_build_metadata(FINALIZED)
-          set_new_channel_params(new_build_metadata)
-          update_ready = get_consistent_flag(FINALIZED)
-
-      set_status_params(UpdaterState.IDLE, update_available, update_ready)
+            set_status_params(UpdaterState.FINALIZING)
+            finalize_update()
+            new_build_metadata = get_build_metadata(FINALIZED)
+            set_new_channel_params(new_build_metadata)
+            update_ready = get_consistent_flag(FINALIZED)
+            set_status_params(UpdaterState.IDLE, update_available, update_ready)
+          except Exception:
+            set_status_params(UpdaterState.FAILED, False, False)
+            cloudlog.exception("exception while downloading ...")
     else:
       set_status_params(UpdaterState.FAILED, False, False)
 

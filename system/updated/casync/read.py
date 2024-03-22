@@ -11,6 +11,9 @@ from openpilot.system.updated.casync.chunk_reader import ChunkReader, DirectoryC
 from openpilot.system.updated.casync.format import CAArchive, CAEntry, CAFilename, CAGoodbye, CAIndex, CAPayload, CASymlink
 
 
+CA_INDEX_TIMEOUT = 30
+
+
 @dataclass
 class Node(abc.ABC):
   entry: CAEntry
@@ -110,7 +113,7 @@ def extract_local(local_caidx, output_path: pathlib.Path):
 
 
 def extract_remote(remote_caidx, output_path: pathlib.Path):
-  resp = requests.get(remote_caidx, timeout=30)
+  resp = requests.get(remote_caidx, timeout=CA_INDEX_TIMEOUT)
   resp.raise_for_status()
   caidx = CAIndex.from_buffer(io.BytesIO(resp.content))
   casync_store = os.path.join(os.path.dirname(remote_caidx), "default.castr")
